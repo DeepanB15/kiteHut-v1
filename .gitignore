@@ -1,0 +1,30 @@
+# Generated / runtime / cache artifacts (Cleanup 1 — minimal)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+*.log
+*.err
+*.db
+*.db-*
+.kitehut/embeddings.jsonl
+backend/.kitehut/embeddings.jsonl
+# KiteHut-generated knowledge output. Commit it deliberately in your own projects if you want it shared.
+.kitehut/
+backend/workspace/
+
+# Keep local environment config private; commit only example templates.
+.env
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.*.example
+KiteHut/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.zip
+.DS_Store
