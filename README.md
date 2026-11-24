@@ -62,21 +62,37 @@ One Python package, three integrated engines — not microservices. Details:
 | Evidence collection and verification with hashes and stale flags | IMPLEMENTED |
 | MCP server with read-only `kitehut_*` tools | IMPLEMENTED |
 | Claude Code integration | PARTIALLY IMPLEMENTED (registers and connects; see [docs](docs/integrations/CLAUDE_CODE.md)) |
-| Codex integration | PARTIALLY IMPLEMENTED (config accepted; end-to-end not verified) |
-| Cross-file call resolution, non-Python languages | NOT IMPLEMENTED |
+| Codex integration | PARTIALLY IMPLEMENTED (config persisted; end-to-end not verified) |
+| Cross-file call resolution (imported functions, aliases, `self`/`cls` methods) | IMPLEMENTED (conservative; ambiguous calls stay unresolved) |
+| Languages other than Python | NOT IMPLEMENTED |
 | Legacy agent/guardian/dashboard (from RepoLens) | EXPERIMENTAL, kept for compatibility |
 
 Full matrix: [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Installation
 
-Requires Python 3.11+.
+Requires Python 3.11+. The Python package lives in `backend/`; install from there.
 
 ```bash
-git clone https://github.com/DeepanB15/kitehut.git
-cd kitehut/backend
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e .                                        # add ".[dev]" to run the tests
+git clone https://github.com/DeepanB15/kiteHut-v1.git
+cd kiteHut-v1/backend
+```
+
+**Linux / macOS**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"        # drop "[dev]" if you do not need the test tools
+kitehut --version
+```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
 kitehut --version
 ```
 
@@ -84,21 +100,16 @@ More options (including a non-editable install): [docs/installation/INSTALLATION
 
 ## Quick start
 
+Run these from the `backend/` directory (or anywhere, once the CLI is installed):
+
 ```bash
 kitehut analyze ./my-project        # builds ./my-project/.kitehut/
-cat ./my-project/.kitehut/knowledge/INDEX.md
-# open ./my-projecd path\to\kitehut\backend
+```
 
-# Create virtual environment
-python -m venv .venv
+Then open `my-project/.kitehut/knowledge/INDEX.md` and
+`my-project/.kitehut/visualization/graph.html` (offline; double-click it).
 
-# Activate virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Install KiteHut
-python -m pip install --upgrade pip
-pip install -e ".[dev]"ct/.kitehut/visualization/graph.html in a browser (works offline)
-
+```bash
 kitehut context ./my-project "how is the order total calculated"
 kitehut evidence ./my-project "calculate_total exists" --file shop/pricing.py --verify
 
@@ -196,8 +207,9 @@ that comparison is PENDING (framework and rationale in
 ## Limitations
 
 - **Python only.** Other languages are not analyzed.
-- **Conservative resolution.** Calls to functions imported from other files are generally *not*
-  resolved (counted as unresolved, never guessed), so caller/callee data is incomplete by design.
+- **Conservative resolution.** Calls are resolved only when the target is unique: same-file,
+  imported (including aliases), module-qualified (`mod.func`) and `self`/`cls` method calls.
+  Ambiguous or dynamic calls are counted as unresolved, never guessed.
 - **Static analysis.** Dynamic imports, reflection and monkey-patching are not modeled.
 - Context retrieval is lexical + graph ranking; no embeddings. Token counts are `chars/4` estimates.
 - Hard-coded secrets in `.py` files can appear in source snippets; KiteHut applies best-effort redaction to what it *serves*, which is a heuristic, not a scanner.
@@ -206,7 +218,7 @@ Complete list: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Roadmap
 
-Planned, **not** implemented: cross-file call resolution; more languages (TypeScript first);
+Planned, **not** implemented: more languages (TypeScript first);
 incremental graph updates; embedding-assisted retrieval via the existing retrieval stack; a
 token-savings benchmark with a real tokenizer; verified Codex end-to-end test; consolidating the
 legacy context/retrieval modules ([audit](docs/architecture/CONTEXT_AUDIT.md)).
@@ -224,4 +236,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-`backend/pyproject.toml` declares MIT, but **no `LICENSE` file is included yet** — add one (with the correct copyright holder) before public release.
+KiteHut is released under the MIT License — see [LICENSE](LICENSE) (Copyright (c) 2026 Deepan B).
+`backend/LICENSE` is an identical copy so the license ships inside the wheel and sdist.
+Third-party dependencies, and any code inherited from other projects, keep their own licenses and
+are **not** covered by KiteHut's MIT license.

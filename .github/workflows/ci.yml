@@ -2,9 +2,10 @@
 # KiteHut CI — runs on push and pull requests
 #
 # Jobs:
-#   1. backend-tests  — phase integration harnesses + pytest
-#   2. frontend-build — TypeScript check + Vite production build
-#   3. docker-build   — verifies both images build
+#   1. backend-tests  — phase integration harnesses + pytest (Python 3.11 and 3.12)
+#   2. package        — builds wheel/sdist, checks LICENSE, installs the wheel clean, CLI smoke test
+#   3. frontend-build — TypeScript check + Vite production build
+#   4. docker-build   — verifies both images build
 # ============================================================
 
 name: CI
@@ -16,8 +17,12 @@ on:
 
 jobs:
   backend-tests:
-    name: Backend Tests
+    name: Backend Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     defaults:
       run:
         working-directory: backend
@@ -26,7 +31,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
@@ -53,6 +58,44 @@ jobs:
 
       - name: Run pytest (Phase 8/9/10 API tests)
         run: pytest -q
+
+  package:
+    name: Build & Install Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Verify archives ship the LICENSE
+        run: |
+          python -c "import glob, zipfile; w = sorted(glob.glob('dist/*.whl'))[-1]; names = zipfile.ZipFile(w).namelist(); assert any(n.endswith('/LICENSE') for n in names), names; print(w, 'ships LICENSE')"
+          tar -tzf dist/*.tar.gz | grep -E '(^|/)LICENSE$'
+          python -c "import glob, zipfile; print([n for n in zipfile.ZipFile(sorted(glob.glob('dist/*.whl'))[-1]).namelist() if 'license' in n.lower() or 'LICENSE' in n])"
+
+      - name: Install the built wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/venv/bin/kitehut" --version
+
+      - name: CLI smoke test from the installed wheel
+        run: |
+          cp -R ../examples/demo_project "$RUNNER_TEMP/demo"
+          "$RUNNER_TEMP/venv/bin/kitehut" analyze "$RUNNER_TEMP/demo"
+          "$RUNNER_TEMP/venv/bin/kitehut" status "$RUNNER_TEMP/demo" --knowledge-only --strict
+          "$RUNNER_TEMP/venv/bin/kitehut" evidence "$RUNNER_TEMP/demo" "calculate_total exists" --file shop/pricing.py --verify
 
   frontend-build:
     name: Frontend Build

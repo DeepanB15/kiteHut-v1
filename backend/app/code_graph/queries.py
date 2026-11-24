@@ -21,7 +21,9 @@ from typing import Any, Dict, List, Optional
 from app.code_graph.models import (
     CodeGraph,
     EdgeKind,
+    FileNode,
     GraphEdge,
+    ResolutionKind,
     SymbolNode,
 )
 
@@ -209,7 +211,232 @@ def dependents(graph: CodeGraph, file_id: str, depth: int = 1) -> QueryResult:
     return _traverse(graph, file_id, depth=depth, kinds={EdgeKind.IMPORTS}, direction="in")
 
 
+# ---------------------------------------------------------------------------
+# Impact analysis
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ImpactEntry:
+    """A node affected by a change, reached at ``depth`` over a resolved edge."""
+
+    id: str
+    relative_path: str
+    qualified_name: Optional[str]
+    depth: int
+    relationship: str  # "imports" | "calls"
+    edge: GraphEdge
+
+
+def _impact(
+    graph: CodeGraph,
+    start_id: str,
+    *,
+    kind: EdgeKind,
+    max_depth: int,
+    relationship: str,
+) -> List[ImpactEntry]:
+    """Breadth-first reverse traversal over resolved ``kind`` edges.
+
+    Each node is reported once at its minimum depth; ordering is
+    ``(depth, path, qualified name, id)`` and cycles terminate.
+    """
+    if max_depth < 0:
+        raise ValueError("max_depth must be >= 0")
+    known_ids, _, incoming, symbols_by_id = _index(graph)
+    files_by_id = {file.id: file for file in graph.files}
+    if start_id not in known_ids or max_depth == 0:
+        return []
+
+    seen = {start_id}
+    frontier = [start_id]
+    entries: List[ImpactEntry] = []
+    for level in range(1, max_depth + 1):
+        next_frontier: List[str] = []
+        level_entries: List[ImpactEntry] = []
+        for node_id in sorted(frontier):
+            for edge in incoming.get(node_id, []):
+                if edge.kind != kind or edge.resolution != ResolutionKind.RESOLVED:
+                    continue
+                other = edge.source_id
+                if other in seen:
+                    continue
+                seen.add(other)
+                next_frontier.append(other)
+                symbol = symbols_by_id.get(other)
+                file_node = files_by_id.get(other)
+                if symbol is not None:
+                    level_entries.append(
+                        ImpactEntry(
+                            id=other,
+                            relative_path=symbol.relative_path,
+                            qualified_name=symbol.qualified_name,
+                            depth=level,
+                            relationship=relationship,
+                            edge=edge,
+                        )
+                    )
+                elif file_node is not None:
+                    level_entries.append(
+                        ImpactEntry(
+                            id=other,
+                            relative_path=file_node.relative_path,
+                            qualified_name=None,
+                            depth=level,
+                            relationship=relationship,
+                            edge=edge,
+                        )
+                    )
+        level_entries.sort(
+            key=lambda item: (
+                item.depth,
+                item.relative_path,
+                item.qualified_name or "",
+                item.id,
+            )
+        )
+        entries.extend(level_entries)
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return entries
+
+
+def impacted_files(graph: CodeGraph, file_id: str, max_depth: int = 3) -> List[ImpactEntry]:
+    """Files that (transitively) import ``file_id`` — the change-impact set."""
+    return _impact(
+        graph, file_id, kind=EdgeKind.IMPORTS, max_depth=max_depth,
+        relationship="imports",
+    )
+
+
+def impacted_symbols(graph: CodeGraph, symbol_id: str, max_depth: int = 3) -> List[ImpactEntry]:
+    """Symbols that (transitively) call ``symbol_id`` — its caller impact set."""
+    return _impact(
+        graph, symbol_id, kind=EdgeKind.CALLS, max_depth=max_depth,
+        relationship="calls",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Circular imports
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ImportCycle:
+    """A strongly connected set of files connected by resolved IMPORTS edges."""
+
+    members: List[str]
+    edges: List[GraphEdge]
+
+    def describe(self) -> str:
+        """One-line, source-backed explanation of the cycle."""
+        where = " -> ".join([*self.members, self.members[0]])
+        locations = ", ".join(
+            f"{edge.source_file}:{edge.start_line}" for edge in self.edges
+        )
+        return f"Import cycle: {where} (imports at {locations})"
+
+
+def _strongly_connected(adjacency: Dict[str, List[str]]) -> List[List[str]]:
+    """Iterative Tarjan SCC; components are deterministic for sorted input."""
+    index_of: Dict[str, int] = {}
+    lowlink: Dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: List[str] = []
+    result: List[List[str]] = []
+    counter = 0
+
+    for start in sorted(adjacency):
+        if start in index_of:
+            continue
+        work = [(start, 0)]
+        while work:
+            node, child_index = work[-1]
+            if child_index == 0:
+                index_of[node] = counter
+                lowlink[node] = counter
+                counter += 1
+                stack.append(node)
+                on_stack.add(node)
+            children = adjacency.get(node, [])
+            if child_index < len(children):
+                child = children[child_index]
+                work[-1] = (node, child_index + 1)
+                if child not in index_of:
+                    work.append((child, 0))
+                elif child in on_stack:
+                    lowlink[node] = min(lowlink[node], index_of[child])
+                continue
+            # All children processed: close the component rooted here.
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                lowlink[parent] = min(lowlink[parent], lowlink[node])
+            if lowlink[node] == index_of[node]:
+                component: List[str] = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                result.append(sorted(component))
+    return result
+
+
+def import_cycles(graph: CodeGraph) -> List[ImportCycle]:
+    """Detect circular module dependencies among **resolved** IMPORTS edges.
+
+    Self-imports are ignored.  Each cycle lists its members (repository-relative
+    paths) and every resolved import edge between members, so callers can show
+    the exact source locations.  Results are sorted by first member path.
+    """
+    files_by_id = {file.id: file for file in graph.files}
+    adjacency: Dict[str, List[str]] = {file.id: [] for file in graph.files}
+    edges_by_source: Dict[str, List[GraphEdge]] = {}
+    for edge in graph.edges:
+        if (
+            edge.kind == EdgeKind.IMPORTS
+            and edge.resolution == ResolutionKind.RESOLVED
+            and edge.source_id in files_by_id
+            and edge.target_id in files_by_id
+            and edge.source_id != edge.target_id
+        ):
+            adjacency.setdefault(edge.source_id, []).append(edge.target_id)
+            edges_by_source.setdefault(edge.source_id, []).append(edge)
+    for targets in adjacency.values():
+        targets.sort()
+    for edges in edges_by_source.values():
+        edges.sort(key=lambda edge: (edge.source_file, edge.start_line, edge.id or ""))
+
+    cycles: List[ImportCycle] = []
+    for component in _strongly_connected(adjacency):
+        if len(component) < 2:
+            continue
+        members = {files_by_id[node].relative_path for node in component}
+        member_ids = set(component)
+        cycle_edges = sorted(
+            (
+                edge
+                for source, edges in edges_by_source.items()
+                if source in member_ids
+                for edge in edges
+                if edge.target_id in member_ids
+            ),
+            key=lambda edge: (edge.source_file, edge.start_line, edge.id or ""),
+        )
+        cycles.append(
+            ImportCycle(members=sorted(members), edges=cycle_edges)
+        )
+    cycles.sort(key=lambda cycle: cycle.members[0])
+    return cycles
+
+
 __all__ = [
+    "ImpactEntry",
+    "ImportCycle",
     "QueryResult",
     "RelationshipHit",
     "find_symbols",
@@ -217,4 +444,7 @@ __all__ = [
     "callees",
     "imports",
     "dependents",
+    "impacted_files",
+    "impacted_symbols",
+    "import_cycles",
 ]

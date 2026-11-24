@@ -16,7 +16,7 @@ args = ["mcp", "/path/to/project"]
 ## Status: PARTIALLY IMPLEMENTED
 | Check | Result |
 |---|---|
-| `codex mcp add` accepts the server and persists it to the config | Verified |
+| `codex mcp add` accepts the server and persists it to the config | **Not verified** (Codex CLI not installed in the verification environment) |
 | Codex launching the server and listing tools | **Not verified** |
 | A model-driven tool call from Codex | **Not verified** |
 | MCP protocol over stdio with the official Python client | Verified (automated test) |

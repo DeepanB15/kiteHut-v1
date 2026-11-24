@@ -1,8 +1,8 @@
 # KiteHut PR-1.7 — Git History & Database Authority Resolution
 
 **Mode:** read-only investigation  
-**Canonical project:** `C:\Users\Deepan B\Desktop\KiteHut`  
-**Original outer-repository backup:** `C:\Users\Deepan B\Desktop\KiteHut_Backups\PR-1.2\20261107-224339\workspace-repolens-v3`
+**Canonical project:** `<repo>`  
+**Original outer-repository backup:** `<backup-root>\PR-1.2\20261107-224339\workspace-repolens-v3`
 
 ## Executive conclusion
 
@@ -15,7 +15,7 @@
 
 | Property | Current `KiteHut/.git` | PR-1.2 outer backup `.git` | Result |
 |---|---|---|---|
-| Git root | `C:/Users/Deepan B/Desktop/KiteHut` | `C:/Users/Deepan B/Desktop/KiteHut_Backups/PR-1.2/20261107-224339/workspace-repolens-v3` | Expected locations |
+| Git root | `<repo>` | `<backup-root>/PR-1.2/20261107-224339/workspace-repolens-v3` | Expected locations |
 | `HEAD` | `4cadd49092abbe8bc0b6e9e5f93970b6492fbeb9` | Same | Match |
 | `HEAD` parent | None (initial commit) | None | Match |
 | Current branch | `main` | `main` | Match |

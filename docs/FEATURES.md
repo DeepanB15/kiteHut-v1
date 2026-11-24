@@ -8,15 +8,17 @@ Legend: **IMPLEMENTED** works and is covered by tests · **PARTIALLY IMPLEMENTED
 |---|---|---|
 | Python file/symbol discovery (classes, functions, methods) | IMPLEMENTED | `.py` only |
 | Resolved imports (in-repository) | IMPLEMENTED | third-party/unresolved imports are counted |
-| Resolved calls | PARTIALLY IMPLEMENTED | conservative; calls to imported functions in other files are generally unresolved |
+| Resolved calls | IMPLEMENTED (conservative) | same-file, imported functions (incl. `as` aliases and relative imports), `self`/`cls` methods, module-qualified (`mod.f()`) and same-file `Class.method()`; ambiguous/dynamic calls stay unresolved with diagnostics |
 | Deterministic graph JSON + validation | IMPLEMENTED | |
 | Graph queries (symbol lookup, callers/callees, imports/dependents) | IMPLEMENTED | |
+| Dependency impact analysis (`impacted_files`, `impacted_symbols`) | IMPLEMENTED (library API) | bounded reverse traversal over resolved edges; **no CLI/MCP command exposes it yet** |
+| Circular dependency detection (`import_cycles`) | IMPLEMENTED (library API) | SCC over resolved IMPORTS edges; members + edge source locations; **no CLI/MCP command exposes it yet** |
 | `.kitehut/` generation, atomic writes, ownership marker | IMPLEMENTED | |
 | Markdown knowledge (INDEX, architecture, module and symbol pages) | IMPLEMENTED | page caps on large repos |
 | Offline HTML graph | IMPLEMENTED | verified in headless Chromium: no console errors, no network requests |
 | Freshness / stale detection / refresh | IMPLEMENTED | content-hash based |
 | Smart context (ranking, de-dup, token budget, freshness check) | IMPLEMENTED | lexical + graph; token counts are `chars/4` estimates |
-| Evidence collection + verification | IMPLEMENTED | reuses existing verification engine |
+| Evidence collection + verification | IMPLEMENTED | reuses existing verification engine; explicit `VERIFIED`/`UNVERIFIED`/`STALE`/`INSUFFICIENT_EVIDENCE`/`NOT_FOUND` verdict alongside the compatible `status` |
 | Secret redaction of served snippets | PARTIALLY IMPLEMENTED | heuristic patterns only |
 | CLI (`analyze graph knowledge visualize refresh status context evidence mcp`) | IMPLEMENTED | |
 | Benchmark script | IMPLEMENTED | token-savings comparison PENDING |
@@ -26,13 +28,12 @@ Legend: **IMPLEMENTED** works and is covered by tests · **PARTIALLY IMPLEMENTED
 |---|---|---|
 | MCP server (stdio), read-only default | IMPLEMENTED | tested with the official MCP Python client over real stdio |
 | Claude Code | PARTIALLY IMPLEMENTED | `claude mcp add` + health check = Connected; no model-driven tool call tested |
-| OpenAI Codex | PARTIALLY IMPLEMENTED | `codex mcp add` accepted and persisted; connection/tool call not tested |
+| OpenAI Codex | PARTIALLY IMPLEMENTED | manual `config.toml` documented; Codex CLI not available for verification, connection/tool call not tested |
 | Mutating agent tools over MCP | IMPLEMENTED (opt-in) | `--allow-agent-tools`; unchanged legacy behavior |
 
 ## Not built
 | Feature | Status |
 |---|---|
-| Cross-file call resolution | NOT IMPLEMENTED |
 | Languages other than Python | NOT IMPLEMENTED |
 | Incremental graph updates | PLANNED |
 | Embedding-assisted retrieval integration | PLANNED |

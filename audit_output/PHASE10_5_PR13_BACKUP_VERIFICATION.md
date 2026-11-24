@@ -5,8 +5,8 @@ Status: VERIFICATION IN PROGRESS / NO-GO FOR CLEANUP
 
 This report records the current state of the PR-1.2 consolidation and the backup directory created on `2026-11-07 22:43:39` at:
 
-- `C:\Users\Deepan B\Desktop\KiteHut_Backups\PR-1.2\20261107-224339`
-- `C:\Users\Deepan B\Desktop\KiteHut`
+- `<backup-root>\PR-1.2\20261107-224339`
+- `<repo>`
 
 No deletion, rename, move, database modification, Git write, commit, push, or application startup was performed during this verification step.
 
@@ -81,7 +81,7 @@ This means the backup directory is usable as a preservation snapshot but should 
 
 The new project root was created at:
 
-- `C:\Users\Deepan B\Desktop\KiteHut`
+- `<repo>`
 
 Observed key layout:
 
@@ -98,7 +98,7 @@ Observed key layout:
 
 Git verification for the new root:
 
-- `git rev-parse --show-toplevel` => `C:/Users/Deepan B/Desktop/KiteHut`
+- `git rev-parse --show-toplevel` => `<repo>`
 - `git rev-parse HEAD` => `4cadd49092abbe8bc0b6e9e5f93970b6492fbeb9`
 - `git branch --show-current` => `main`
 - remote => `https://github.com/DeepanB15/kiteHut.git`
@@ -230,7 +230,7 @@ The backup roots for all five required sources exist with the expected directory
 
 Verified in the new root:
 
-- Git root: `C:/Users/Deepan B/Desktop/KiteHut`
+- Git root: `<repo>`
 - HEAD: `4cadd49092abbe8bc0b6e9e5f93970b6492fbeb9`
 - Branch: `main`
 - Remote: `https://github.com/DeepanB15/kiteHut.git`

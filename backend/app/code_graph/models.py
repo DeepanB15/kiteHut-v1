@@ -1189,6 +1189,9 @@ class ImportReference(_GraphModel):
     module: str = ""
     imported_names: List[str] = Field(default_factory=list)
     alias: Optional[str] = None
+    #: ``from module import name as local`` bindings: original name -> local name.
+    #: Empty for plain ``import`` statements (``alias`` covers those).
+    name_aliases: Dict[str, str] = Field(default_factory=dict)
     level: int = Field(default=0, ge=0)
     start_line: int = Field(ge=1)
     end_line: int = Field(ge=1)

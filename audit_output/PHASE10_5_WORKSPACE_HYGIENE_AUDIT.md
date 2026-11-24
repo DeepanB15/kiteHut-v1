@@ -6,7 +6,7 @@ STOP: Phase 11 NOT started. Zero files edited/deleted/moved/renamed/committed.
 ================================================================================
 1. EXECUTIVE SUMMARY
 ================================================================================
-Workspace: C:\Users\Deepan B\Desktop\repolens-v3 (NOT a git repo itself).
+Workspace: <workspace> (NOT a git repo itself).
 Canonical active Git repo: repolens-v1/ (branch main; head 95e08e1; 206 tracked files).
 Phase 10 rename completed (repolens→kitehut); workspace hygiene audit now performed.
 Findings: 102 workspace repos under backend/workspace/ (external copies, must exclude from graph); duplicate DB filenames (repolens.db + kitehut.db coexisting at root; backend/ has both); historical archive repolens-v2/ (alternate architecture, no git, safe to archive); zero secrets printed; all source logic preserved; .env files exist (read-only inspection only, values not shown); .venv / node_modules / dist / .pytest_cache present (generated, exclude from graph and commit); memory/ has 1 phase note; "New folder" empty; audit_output/ has Phase 10 + diagnosis + preflight reports.
@@ -16,7 +16,7 @@ No modifications performed. Cleanup recommendations only; no cleanup executed.
 2. CANONICAL PROJECT IDENTIFICATION
 ================================================================================
 CANONICAL PROJECT: repolens-v1/
-PATH: /c/Users/Deepan B/Desktop/repolens-v3/repolens-v1
+PATH: <repo>
 GIT REPOSITORY: YES (.git present)
 BRANCH: main
 HEAD: 95e08e1 Initial commit (single commit repo; all untracked source from Phase 8-10)
@@ -30,7 +30,7 @@ NOT canonical: repolens-v2/ (historical archive), root workspace (container only
 ================================================================================
 3. WORKSPACE STRUCTURE (top-level)
 ================================================================================
-C:\Users\Deepan B\Desktop\repolens-v3/ (container; NOT git)
+<workspace>/ (container; NOT git)
 ├── audit_output/           (audit reports; keep; exclude from graph)
 ├── repolens-v1/            CANONICAL (git; active; Phase 10 rename applied)
 ├── repolens-v2/            HISTORICAL ARCHIVE (NO git; alternate architecture; repo-lens/ subproject)
@@ -129,7 +129,7 @@ M. UNKNOWN — REQUIRES REVIEW
 ================================================================================
 5. repolens-v2 AUDIT
 ================================================================================
-PATH: /c/Users/Deepan B/Desktop/repolens-v3/repolens-v2
+PATH: <workspace>/repolens-v2
 GIT REPOSITORY: NO (.git absent)
 ARCHITECTURE: Historical alternate RepoLens design (ARCHITECTURE.md header confirms "GRAPH FIRST, AI SECOND"; Next.js UI + FastAPI + PostgreSQL/pgvector option; diff from v1 which uses FastAPI + local Ollama + SQLite + no PostgreSQL)
 AGE/STATUS: Older parallel concept (filename timestamp Oct 28/Oct 30; v1 current work dates Aug-Oct 2026; v2 is earlier version or alternate branch concept)

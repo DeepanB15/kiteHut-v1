@@ -128,6 +128,40 @@ class OutputLayout:
                 f"Cannot create '{OUTPUT_DIR_NAME}' in the repository: {exc}"
             ) from exc
 
+    def safe_mkdir(self, directory: Path) -> Path:
+        """Create ``directory`` inside ``.kitehut`` one component at a time.
+
+        Every component is checked for symlinks before and after creation, so
+        a hostile checkout cannot redirect a nested output directory (e.g.
+        ``graph/``) outside the repository.
+        """
+        try:
+            relative = directory.relative_to(self.base)
+        except ValueError:
+            raise UnsafeOutputError(
+                f"Refusing to create a directory outside '{OUTPUT_DIR_NAME}': {directory}"
+            ) from None
+        if ".." in relative.parts:
+            raise UnsafeOutputError(f"Refusing path traversal: {directory}")
+        current = self.base
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise UnsafeOutputError(
+                    f"Refusing to write through a symbolic link: {current}"
+                )
+            try:
+                current.mkdir(exist_ok=True)
+            except OSError as exc:
+                raise UnsafeOutputError(
+                    f"Cannot create output directory {current}: {exc}"
+                ) from exc
+            if current.is_symlink():
+                raise UnsafeOutputError(
+                    f"Refusing to write through a symbolic link: {current}"
+                )
+        return directory
+
     def safe_target(self, target: Path) -> Path:
         """Return ``target`` if it is a safe write location, else raise.
 

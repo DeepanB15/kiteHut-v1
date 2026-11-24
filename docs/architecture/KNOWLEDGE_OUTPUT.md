@@ -37,7 +37,12 @@ relationship filters, search, details panel with path and line range. Bounded by
 deliberately **not** stored.
 
 ## Ownership and safety
-- `graph/repository.json`, `metadata.json`, and any file with the marker are KiteHut-owned.
+- `metadata.json` and every `.md` page carry the `kitehut:generated` marker; only marked files are overwritten.
+- `graph/repository.json` is JSON and cannot carry the text marker without a schema change. It is
+  overwritten only when a KiteHut `metadata.json` from a previous run proves the folder is ours.
+  On a fresh `.kitehut/`, an existing graph file is refused (nothing else is written); a user-created
+  `metadata.json` likewise stops the run before any write.
 - A pre-existing `.md`/`.html`/`metadata.json` **without** the marker is left untouched and reported.
 - Stale generated pages are pruned only if they carry the marker; other files (e.g. your notes) stay.
-- `.kitehut` and subdirectories must be real directories; symlinks are refused.
+- `.kitehut` and subdirectories must be real directories; symlinks are refused at every level, including
+  `graph/`, `knowledge/` and `visualization/`.

@@ -1,6 +1,9 @@
 # Implementation status
 
-Snapshot for **v0.1.0** (baseline commit `85e47c4`). Feature-level detail: [FEATURES.md](FEATURES.md).
+Snapshot for **v0.1.0**. It describes this repository's working tree; no external baseline
+commit is assumed (the checkout's history contains a single initial commit, so the older
+`85e47c4` reference inherited from the RepoLens-era notes could not be verified).
+Feature-level detail: [FEATURES.md](FEATURES.md).
 The pre-KiteHut status document is preserved at `archive/repolens-v2/pre-kitehut-docs/IMPLEMENTATION_STATUS.md`.
 
 ## Done

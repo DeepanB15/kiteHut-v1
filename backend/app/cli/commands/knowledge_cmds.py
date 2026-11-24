@@ -177,6 +177,7 @@ def evidence_command(path, statement, target_file, target_line, expected_pattern
         click.echo(json.dumps(rep.to_dict(), indent=2))
         return
     print_header("KiteHut Evidence")
+    print_info(f"Verdict: {bold(rep.verdict)}")
     if rep.status:
         print_info(f"Verification status: {bold(rep.status)}")
         for r in rep.reasons:

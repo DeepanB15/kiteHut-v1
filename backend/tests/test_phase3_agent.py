@@ -15,9 +15,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
-BACKEND_DIR = "/c/Users/Deepan B/Desktop/repolens/backend"
-
-
 # ------------------------------------------------------------------
 # Agent loop
 # ------------------------------------------------------------------

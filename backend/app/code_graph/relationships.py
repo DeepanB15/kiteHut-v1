@@ -397,6 +397,13 @@ def _extract_imports_from_source(
             try:
                 from_module = node.module or ""
                 imported_names = [alias_node.name for alias_node in node.names]
+                # ``from x import y as z``: keep the original symbol name and
+                # record the local binding so call resolution can follow it.
+                name_aliases = {
+                    alias_node.name: alias_node.asname
+                    for alias_node in node.names
+                    if alias_node.asname and alias_node.name != "*"
+                }
                 start_line = node.lineno
                 end_line = getattr(node, "end_lineno", node.lineno)
                 start_column = column(node, start_line, getattr(node, "col_offset", 0))
@@ -406,6 +413,7 @@ def _extract_imports_from_source(
                     module=from_module,
                     imported_names=imported_names,
                     alias=None,
+                    name_aliases=name_aliases,
                     level=node.level,
                     start_line=start_line,
                     end_line=end_line,
@@ -702,7 +710,7 @@ class _CallCollector(ast.NodeVisitor):
     ) -> None:
         self.source_file = source_file
         self.all_declarations = all_declarations
-        self.calls: list[
+        self.calls: list[  # (call site, enclosing declaration, all shadows, local shadows)
             tuple[CallSite, Optional[SymbolDeclaration], frozenset]
         ] = []
         self.diagnostics: list[GraphDiagnostic] = []
@@ -838,6 +846,19 @@ class _CallCollector(ast.NodeVisitor):
         if self._module_decl_cache is None:
             self._module_decl_cache = self._module_declaration()
         return self._module_decl_cache
+
+    def _current_local_shadows(self) -> frozenset:
+        """Names bound in function-like scopes enclosing this call.
+
+        Unlike :meth:`_current_shadowed`, this excludes module-level and
+        class-body bindings, so an attribute receiver can be distinguished
+        from a function-local parameter/assignment that shadows an import.
+        """
+        names: set[str] = set()
+        for kind, shadow in self._shadow_stack:
+            if kind in ("func", "lambda", "comp"):
+                names.update(shadow)
+        return frozenset(names)
 
     def _current_shadowed(self) -> frozenset:
         # Class-body bindings are visible only to statements that execute
@@ -1156,7 +1177,8 @@ class _CallCollector(ast.NodeVisitor):
 
         caller = self._current_caller()
         shadowed = self._current_shadowed()
-        self.calls.append((cs, caller, shadowed))
+        local_shadows = self._current_local_shadows()
+        self.calls.append((cs, caller, shadowed, local_shadows))
         self.generic_visit(node)
 
 
@@ -1164,13 +1186,13 @@ def _extract_calls_from_source(
     source_file: SourceFile,
     all_declarations: list[SymbolDeclaration],
 ) -> tuple[
-    list[tuple[CallSite, Optional[SymbolDeclaration], frozenset]],
+    list[tuple[CallSite, Optional[SymbolDeclaration], frozenset, frozenset]],
     list[GraphDiagnostic],
 ]:
     """Extract call sites with their enclosing declarations.
 
     Returns ``(calls_with_caller, diagnostics)`` where ``calls_with_caller`` is
-    a list of ``(CallSite, caller, shadowed_names)`` triples.  ``caller`` is
+    a list of ``(CallSite, caller, shadowed_names, local_shadow_names)`` tuples.  ``caller`` is
     the innermost enclosing declaration, or the file's MODULE declaration for
     module-level calls, or ``None`` when no declaration exists for the file.
     ``shadowed_names`` is the union of names bound in the enclosing scopes
@@ -1264,10 +1286,273 @@ def _is_visible_in_caller_scope(
     return target_chain[: len(caller_chain)] == caller_chain
 
 
+@dataclass(frozen=True)
+class _ImportBindings:
+    """Local names bound by one module's import statements."""
+
+    #: local name -> dotted module (``import pkg.mod as m`` or ``import pkg``)
+    module_aliases: Dict[str, str]
+    #: local name -> (base module, original symbol name) for ``from ... import``
+    symbol_aliases: Dict[str, Tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class _CallTarget:
+    """Outcome of resolving one call site (``target is None`` = unresolved)."""
+
+    target: Optional[SymbolDeclaration]
+    via: str = ""
+    confidence: str = "high"
+    ambiguous: bool = False
+    detail: str = ""
+
+
+def _import_bindings(import_refs: list[ImportReference]) -> Dict[str, _ImportBindings]:
+    """Map each file to the local names its imports bind.
+
+    Only bindings proven by an import statement are recorded; re-exports,
+    ``import *`` and dynamic imports are deliberately not followed.
+    """
+    modules: Dict[str, Dict[str, str]] = {}
+    symbols: Dict[str, Dict[str, Tuple[str, str]]] = {}
+    for ir in import_refs:
+        path = ir.relative_path
+        modules.setdefault(path, {})
+        symbols.setdefault(path, {})
+        plain_import = (
+            ir.level == 0
+            and bool(ir.module)
+            and list(ir.imported_names) == [ir.module]
+        )
+        if plain_import:
+            # ``import a.b`` binds ``a``; ``import a.b as ab`` binds ``ab``.
+            local = ir.alias or ir.module.split(".")[0]
+            modules[path][local] = ir.module if ir.alias else ir.module.split(".")[0]
+            continue
+        base = (
+            _from_import_base_module(ir, path)
+            if ir.level > 0
+            else (ir.module or None)
+        )
+        if not base:
+            continue
+        for name in ir.imported_names:
+            if name == "*":
+                continue
+            local = ir.name_aliases.get(name) or name
+            symbols[path][local] = (base, name)
+    return {
+        path: _ImportBindings(modules.get(path, {}), symbols.get(path, {}))
+        for path in set(modules) | set(symbols)
+    }
+
+
+def _module_level_declarations(
+    decls_by_file: Dict[str, list[SymbolDeclaration]], path: str, name: str
+) -> list[SymbolDeclaration]:
+    """Declarations named ``name`` at the top level of ``path``."""
+    module_name = _module_qualified_name(path)
+    found: list[SymbolDeclaration] = []
+    for decl in decls_by_file.get(path, []):
+        if decl.name != name or decl.kind == SymbolKind.MODULE:
+            continue
+        if decl.parent_qualified_name is None or decl.parent_qualified_name == module_name:
+            found.append(decl)
+    return found
+
+
+def _enclosing_class(
+    caller: SymbolDeclaration, decls_by_file: Dict[str, list[SymbolDeclaration]]
+) -> Optional[SymbolDeclaration]:
+    """The longest class declaration lexically enclosing ``caller``."""
+    best: Optional[SymbolDeclaration] = None
+    for decl in decls_by_file.get(caller.relative_path, []):
+        if decl.kind != SymbolKind.CLASS or decl is caller:
+            continue
+        if caller.qualified_name.startswith(decl.qualified_name + "."):
+            if best is None or len(decl.qualified_name) > len(best.qualified_name):
+                best = decl
+    return best
+
+
+def _methods_of_class(
+    decls_by_file: Dict[str, list[SymbolDeclaration]], class_qn: str, name: str
+) -> list[SymbolDeclaration]:
+    return [
+        decl
+        for decls in decls_by_file.values()
+        for decl in decls
+        if decl.qualified_name == f"{class_qn}.{name}"
+        and decl.kind in (SymbolKind.METHOD, SymbolKind.ASYNC_METHOD)
+    ]
+
+
+def _resolve_same_file_call(
+    callee: str,
+    caller: SymbolDeclaration,
+    decls_by_file: Dict[str, list[SymbolDeclaration]],
+) -> _CallTarget:
+    candidates = [
+        decl
+        for decl in decls_by_file.get(caller.relative_path, [])
+        if decl.name == callee
+        and decl is not caller
+        and decl.kind
+        not in (SymbolKind.MODULE, SymbolKind.METHOD, SymbolKind.ASYNC_METHOD)
+        and _is_visible_in_caller_scope(decl, caller)
+    ]
+    if len(candidates) == 1:
+        return _CallTarget(candidates[0], via="same_file", confidence="high")
+    if len(candidates) > 1:
+        return _CallTarget(
+            None,
+            via="same_file",
+            ambiguous=True,
+            detail=(
+                f"{len(candidates)} same-file declarations named '{callee}' "
+                "visible in the caller's lexical scope"
+            ),
+        )
+    return _CallTarget(None, via="same_file")
+
+
+def _resolve_imported_call(
+    callee: str,
+    bindings: _ImportBindings,
+    module_index: ModuleIndex,
+    decls_by_file: Dict[str, list[SymbolDeclaration]],
+) -> Optional[_CallTarget]:
+    """Resolve a bare call to a symbol imported from another repository module."""
+    binding = bindings.symbol_aliases.get(callee)
+    if binding is None:
+        return None
+    base, original = binding
+    paths = module_index.candidates(base)
+    if len(paths) != 1:
+        return _CallTarget(
+            None,
+            via="import",
+            ambiguous=len(paths) > 1,
+            detail=f"imported module '{base}' matches {len(paths)} repository files",
+        )
+    found = _module_level_declarations(decls_by_file, paths[0], original)
+    if len(found) == 1:
+        return _CallTarget(found[0], via="import", confidence="high")
+    return _CallTarget(
+        None,
+        via="import",
+        ambiguous=len(found) > 1,
+        detail=(
+            f"{len(found)} module-level declarations named '{original}' in '{base}'"
+        ),
+    )
+
+
+def _resolve_attribute_call(
+    call: CallSite,
+    callee: str,
+    caller: SymbolDeclaration,
+    bindings: _ImportBindings,
+    module_index: ModuleIndex,
+    decls_by_file: Dict[str, list[SymbolDeclaration]],
+) -> _CallTarget:
+    """Resolve ``self``/``cls`` methods, module-qualified and ``Class.method`` calls."""
+    receiver = call.receiver or ""
+    parts = receiver.split(".") if receiver and not receiver.startswith("<") else []
+    if not parts:
+        return _CallTarget(None, via="attribute")
+
+    if parts[0] in ("self", "cls") and len(parts) == 2:
+        cls_decl = _enclosing_class(caller, decls_by_file)
+        if cls_decl is not None:
+            methods = _methods_of_class(
+                {caller.relative_path: decls_by_file.get(caller.relative_path, [])},
+                cls_decl.qualified_name,
+                callee,
+            )
+            if len(methods) == 1:
+                return _CallTarget(methods[0], via=f"{parts[0]}_method", confidence="high")
+            if len(methods) > 1:
+                return _CallTarget(
+                    None,
+                    via=f"{parts[0]}_method",
+                    ambiguous=True,
+                    detail=(
+                        f"{len(methods)} methods named '{callee}' in "
+                        f"'{cls_decl.qualified_name}'"
+                    ),
+                )
+        return _CallTarget(None, via=f"{parts[0]}_method")
+
+    if len(parts) != 2:
+        return _CallTarget(None, via="attribute")
+
+    # ``import pkg.mod as m`` -> ``m.func()``; ``from pkg import mod`` -> ``mod.func()``
+    # only when ``pkg.mod`` is itself a repository module.
+    dotted = bindings.module_aliases.get(parts[0])
+    if dotted is None:
+        symbol_binding = bindings.symbol_aliases.get(parts[0])
+        if symbol_binding is not None:
+            base, original = symbol_binding
+            candidate_module = f"{base}.{original}"
+            if len(module_index.candidates(candidate_module)) == 1:
+                dotted = candidate_module
+    if dotted:
+        paths = module_index.candidates(dotted)
+        if len(paths) == 1:
+            found = _module_level_declarations(decls_by_file, paths[0], callee)
+            if len(found) == 1:
+                return _CallTarget(found[0], via="module_qualified", confidence="medium")
+            return _CallTarget(
+                None,
+                via="module_qualified",
+                ambiguous=len(found) > 1,
+                detail=f"{len(found)} declarations named '{callee}' in '{dotted}'",
+            )
+        if len(paths) > 1:
+            return _CallTarget(
+                None,
+                via="module_qualified",
+                ambiguous=True,
+                detail=f"module '{dotted}' matches {len(paths)} repository files",
+            )
+
+    # ``Class.method(...)`` where ``Class`` is declared in the same file.
+    same_file_classes = [
+        decl
+        for decl in decls_by_file.get(caller.relative_path, [])
+        if decl.kind == SymbolKind.CLASS and decl.name == parts[0]
+    ]
+    if len(same_file_classes) == 1:
+        cls_decl = same_file_classes[0]
+        methods = _methods_of_class(
+            {caller.relative_path: decls_by_file.get(caller.relative_path, [])},
+            cls_decl.qualified_name,
+            callee,
+        )
+        if len(methods) == 1:
+            return _CallTarget(methods[0], via="class_method", confidence="medium")
+        if len(methods) > 1:
+            return _CallTarget(
+                None,
+                via="class_method",
+                ambiguous=True,
+                detail=(
+                    f"{len(methods)} methods named '{callee}' in "
+                    f"'{cls_decl.qualified_name}'"
+                ),
+            )
+    return _CallTarget(None, via="attribute")
+
+
 def _resolve_calls_to_edges(
-    calls_with_caller: list[tuple[CallSite, Optional[SymbolDeclaration], frozenset]],
+    calls_with_caller: list[
+        tuple[CallSite, Optional[SymbolDeclaration], frozenset, frozenset]
+    ],
     all_declarations: list[SymbolDeclaration],
     repository_id: str,
+    import_refs: Optional[list[ImportReference]] = None,
+    source_files: Optional[list[SourceFile]] = None,
 ) -> tuple[list[GraphEdge], list[GraphDiagnostic]]:
     """Resolve extracted call sites into CALLS edges.
 
@@ -1275,8 +1560,13 @@ def _resolve_calls_to_edges(
 
     - Both endpoints must be canonical symbol IDs; the source is the
       enclosing declaration (never a path).
-    - Attribute calls are unresolved unless a deterministic rule proves the
-      target — we have none, so they stay unresolved.
+    - Bare calls resolve in this order: same-file declaration, then a symbol
+      imported from another repository module (``from pkg.mod import f``,
+      including ``as`` aliases and relative imports).  Attribute calls resolve
+      only when the receiver is ``self``/``cls`` (method of the enclosing
+      class), an imported module alias (``mod.f()``), or a class declared in
+      the same file (``Class.method()``).  Any other attribute call stays
+      unresolved.
     - If the callee name is shadowed in an enclosing scope (parameters,
       locals, imports, nested defs), no edge is created.
     - A same-file name match alone is insufficient: the target must also be
@@ -1297,6 +1587,10 @@ def _resolve_calls_to_edges(
     for decl in all_declarations:
         decls_by_file.setdefault(decl.relative_path, []).append(decl)
 
+    bindings_by_file = _import_bindings(import_refs or [])
+    module_index = ModuleIndex.build(source_files or [])
+    empty_bindings = _ImportBindings({}, {})
+
     def _diag(code: str, message: str, call: CallSite) -> GraphDiagnostic:
         return GraphDiagnostic(
             code=code,
@@ -1306,25 +1600,13 @@ def _resolve_calls_to_edges(
             line=call.start_line,
         )
 
-    for call, caller, shadowed in calls_with_caller:
+    for call, caller, shadowed, local_shadows in calls_with_caller:
         if caller is None:
             diagnostics.append(
                 _diag(
                     "call_no_caller",
                     f"Call site at {call.relative_path}:{call.start_line} has no "
                     "enclosing declaration; no CALLS edge created.",
-                    call,
-                )
-            )
-            continue
-
-        if call.receiver is not None:
-            diagnostics.append(
-                _diag(
-                    "attribute_call_unresolved",
-                    f"Attribute call '{call.receiver}' (target '{call.callee_name}') "
-                    f"at {call.relative_path}:{call.start_line} is not resolved; "
-                    "no CALLS edge created.",
                     call,
                 )
             )
@@ -1342,55 +1624,89 @@ def _resolve_calls_to_edges(
             )
             continue
 
-        if callee in (shadowed or frozenset()):
-            diagnostics.append(
-                _diag(
-                    "call_shadowed_unresolved",
-                    f"Callee '{callee}' at {call.relative_path}:{call.start_line} is "
-                    "shadowed by a local binding (parameter, assignment, import or "
-                    "nested definition); no CALLS edge created.",
-                    call,
-                )
+        bindings = bindings_by_file.get(call.relative_path, empty_bindings)
+        if call.receiver is not None:
+            receiver_root = call.receiver.split(".")[0]
+            receiver_shadowed = (
+                receiver_root not in ("self", "cls")
+                and receiver_root in local_shadows
             )
-            continue
+            outcome = _CallTarget(None, via="attribute")
+            if not receiver_shadowed:
+                outcome = _resolve_attribute_call(
+                    call, callee, caller, bindings, module_index, decls_by_file
+                )
+            if outcome.target is None:
+                if outcome.ambiguous:
+                    diagnostics.append(
+                        _diag(
+                            "attribute_call_ambiguous",
+                            f"Attribute call '{call.receiver}' at "
+                            f"{call.relative_path}:{call.start_line} is ambiguous: "
+                            f"{outcome.detail}; no CALLS edge created.",
+                            call,
+                        )
+                    )
+                else:
+                    diagnostics.append(
+                        _diag(
+                            "attribute_call_unresolved",
+                            f"Attribute call '{call.receiver}' (target '{callee}') "
+                            f"at {call.relative_path}:{call.start_line} is not "
+                            "resolved; no CALLS edge created.",
+                            call,
+                        )
+                    )
+                continue
+        else:
+            if callee in (shadowed or frozenset()):
+                diagnostics.append(
+                    _diag(
+                        "call_shadowed_unresolved",
+                        f"Callee '{callee}' at {call.relative_path}:{call.start_line} is "
+                        "shadowed by a local binding (parameter, assignment, import or "
+                        "nested definition); no CALLS edge created.",
+                        call,
+                    )
+                )
+                continue
+            outcome = _resolve_same_file_call(callee, caller, decls_by_file)
+            if outcome.target is None and not outcome.ambiguous:
+                imported = _resolve_imported_call(
+                    callee, bindings, module_index, decls_by_file
+                )
+                if imported is not None:
+                    outcome = imported
+            if outcome.target is None:
+                if outcome.ambiguous:
+                    code = (
+                        "call_ambiguous_declarations"
+                        if outcome.via == "same_file"
+                        else "call_ambiguous_cross_file"
+                    )
+                    diagnostics.append(
+                        _diag(
+                            code,
+                            f"Ambiguous call to '{callee}' at "
+                            f"{call.relative_path}:{call.start_line}: "
+                            f"{outcome.detail}; no CALLS edge created.",
+                            call,
+                        )
+                    )
+                else:
+                    diagnostics.append(
+                        _diag(
+                            "call_unresolved_no_target",
+                            f"No declaration named '{callee}' is visible in the "
+                            f"caller's scope or resolvable through an import for "
+                            f"the call at {call.relative_path}:{call.start_line}; "
+                            "no CALLS edge created.",
+                            call,
+                        )
+                    )
+                continue
 
-        candidates = [
-            decl
-            for decl in decls_by_file.get(call.relative_path, [])
-            if decl.name == callee
-            and decl is not caller
-            and decl.kind
-            not in (
-                SymbolKind.MODULE,
-                SymbolKind.METHOD,
-                SymbolKind.ASYNC_METHOD,
-            )
-            and _is_visible_in_caller_scope(decl, caller)
-        ]
-        if len(candidates) == 0:
-            diagnostics.append(
-                _diag(
-                    "call_unresolved_no_target",
-                    f"No same-file declaration named '{callee}' visible in the "
-                    f"caller's lexical scope for call at "
-                    f"{call.relative_path}:{call.start_line}; no CALLS edge created.",
-                    call,
-                )
-            )
-            continue
-        if len(candidates) > 1:
-            diagnostics.append(
-                _diag(
-                    "call_ambiguous_declarations",
-                    f"{len(candidates)} same-file declarations named '{callee}' "
-                    f"visible in the caller's lexical scope for call at "
-                    f"{call.relative_path}:{call.start_line}; no CALLS edge created.",
-                    call,
-                )
-            )
-            continue
-
-        target = candidates[0]
+        target = outcome.target
         try:
             edge = GraphEdge(
                 id=None,
@@ -1405,9 +1721,9 @@ def _resolve_calls_to_edges(
                 start_column=call.start_column,
                 end_column=call.end_column,
                 source_hash=call.source_hash,
-                confidence="high",
+                confidence=outcome.confidence,
                 resolution="resolved",
-                metadata={"callee": callee},
+                metadata={"callee": callee, "via": outcome.via},
             )
             edges.append(edge)
         except Exception as exc:
@@ -1797,7 +2113,7 @@ class RelationshipExtractor:
 
         # 4. CALLS.
         calls_with_caller: list[
-            tuple[CallSite, Optional[SymbolDeclaration], frozenset]
+            tuple[CallSite, Optional[SymbolDeclaration], frozenset, frozenset]
         ] = []
         for sf in ordered_files:
             if sf.language.lower() != PYTHON_LANGUAGE:
@@ -1812,7 +2128,11 @@ class RelationshipExtractor:
             diagnostics.extend(call_diags)
 
         calls_edges, call_diags = _resolve_calls_to_edges(
-            calls_with_caller, ordered_declarations, repository_id
+            calls_with_caller,
+            ordered_declarations,
+            repository_id,
+            import_refs=import_refs,
+            source_files=ordered_files,
         )
         edges.extend(calls_edges)
         unresolved_calls.extend(call_diags)

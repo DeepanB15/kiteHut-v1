@@ -3,13 +3,28 @@
 Requires **Python 3.11+**. No network access, API key, database, or LLM is needed for core analysis.
 
 ## From source (recommended)
+
 ```bash
-git clone https://github.com/DeepanB15/kitehut.git
-cd kitehut/backend
-python -m venv .venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
+git clone https://github.com/DeepanB15/kiteHut-v1.git
+cd kiteHut-v1/backend
+```
+
+**Linux / macOS**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .                     # developers: pip install -e ".[dev]"
 kitehut --version                    # kitehut, version 0.1.0
+```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
+kitehut --version
 ```
 
 ## Non-editable install
@@ -22,12 +37,15 @@ Declared in `backend/pyproject.toml` and `backend/requirements.txt` (kept in syn
 LangGraph for the optional legacy service, `mcp>=1.2,<2.0`, `networkx`, `click`, `colorama`, `pydantic`, and others. `mcp` 2.x is **not** supported.
 
 ## Verify the installation
+
 ```bash
-cp -R examples/demo_project /tmp/kh-demo
+cp -R ../examples/demo_project /tmp/kh-demo
 kitehut analyze /tmp/kh-demo
 kitehut status /tmp/kh-demo --knowledge-only --strict && echo fresh
 ```
-or run `scripts/demo.sh`.
+
+On Windows PowerShell, copy the sample with `Copy-Item -Recurse ..\examples\demo_project $env:TEMP\kh-demo`
+and run the same `kitehut` commands. You can also run `../scripts/demo.sh`.
 
 ## Optional components
 - **Legacy API/dashboard:** `docker compose up` or see `start-backend.bat` / `start-frontend.bat`. Copy `backend/.env.example` to `backend/.env` first (placeholders only; never commit `.env`).

@@ -74,6 +74,12 @@ class KiteHutMCPServer:
         from app.knowledge.safe_io import resolve_repository_root
 
         self.mcp = FastMCP(self._server_name)
+        # FastMCP 1.x has no ``version`` argument: it builds the low-level server
+        # without one, so ``initialize`` reports the MCP SDK version instead of
+        # ours. Set the application version on the low-level server it wraps.
+        _low_level = getattr(self.mcp, "_mcp_server", None)
+        if _low_level is not None and hasattr(_low_level, "version"):
+            _low_level.version = KITEHUT_VERSION
         self.repository_path = repository_path or "."
         self.allow_agent_tools = self._default_allow_agent_tools if allow_agent_tools is None else allow_agent_tools
         self.registry = create_default_tool_registry()

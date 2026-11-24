@@ -109,13 +109,36 @@ def test_mcp_discover_is_kitehut_branded(analyzed):
 
 
 # ---- MCP: real stdio protocol smoke test ----------------------------------------
-def test_mcp_stdio_protocol_smoke(analyzed):
-    from mcp import ClientSession, StdioServerParameters
+def _stdio_server_params(repo):
+    from mcp import StdioServerParameters
+
+    exe = shutil.which("kitehut")
+    return StdioServerParameters(command=exe, args=["mcp", str(repo)]) if exe else \
+        StdioServerParameters(command=sys.executable, args=["-m", "app.cli.main", "mcp", str(repo)])
+
+
+def test_mcp_stdio_advertises_application_version(analyzed):
+    """The initialize handshake must report KiteHut 0.1.0, not the MCP SDK version."""
+    from mcp import ClientSession
     from mcp.client.stdio import stdio_client
     repo, _ = analyzed
-    exe = shutil.which("kitehut")
-    params = StdioServerParameters(command=exe, args=["mcp", str(repo)]) if exe else \
-        StdioServerParameters(command=sys.executable, args=["-m", "app.cli.main", "mcp", str(repo)])
+    params = _stdio_server_params(repo)
+
+    async def go():
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                return await s.initialize()
+
+    init = asyncio.run(asyncio.wait_for(go(), 60))
+    assert init.serverInfo.name == "KiteHut"
+    assert init.serverInfo.version == "0.1.0"
+
+
+def test_mcp_stdio_protocol_smoke(analyzed):
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+    repo, _ = analyzed
+    params = _stdio_server_params(repo)
 
     async def go():
         async with stdio_client(params) as (r, w):

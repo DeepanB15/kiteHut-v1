@@ -239,15 +239,23 @@ def test_no_incorrect_calls_or_imports_edges(built) -> None:
     for edge in calls:
         caller = symbols[edge.source_id]
         callee = symbols[edge.target_id]
-        # CALLS edges are symbol-to-symbol within the same file.
+        # The call site is always in the caller's file.
         assert caller.relative_path == edge.source_file
-        assert callee.relative_path == edge.source_file
         line = _read_text(repo, edge.source_file).splitlines()[edge.start_line - 1]
         callee_name = edge.metadata["callee"]
         assert callee_name in line and "(" in line
-        assert callee_name in _declared_names_at(
+        # ``callee_name`` is the call-site spelling (it may be an import alias);
+        # the declaration span must hold the target symbol's declared name.
+        assert callee.name in _declared_names_at(
             repo, callee.relative_path, callee.start_line
         ), f"CALLS target is not declared at its recorded span: {edge.id}"
+        if callee.relative_path == edge.source_file:
+            continue
+        # Cross-file calls are only allowed through an import proven by source.
+        assert edge.metadata.get("via") in {"import", "module_qualified"}, edge.id
+        assert _dotted_module(callee.relative_path) in _import_targets(
+            repo, caller.relative_path
+        ), f"cross-file CALLS edge is not backed by an import: {edge.id}"
 
 
 # ---------------------------------------------------------------------------
@@ -436,17 +444,47 @@ def test_shadowed_and_unresolved_calls_emit_diagnostics_only(built) -> None:
         for edge in graph.edges
         if edge.kind == EdgeKind.CALLS and edge.source_id == no_target_symbol.id
     ]
-    # Attribute calls (self.describe) are never converted to CALLS edges.
+    # ``self.describe()`` resolves to the unique method of the enclosing class.
     call_method = next(
         s
         for s in graph.symbols
         if s.qualified_name == "app/service.Service.call_method"
     )
-    assert not [
+    describe = next(
+        s for s in graph.symbols if s.qualified_name == "app/service.Service.describe"
+    )
+    self_calls = [
         edge
         for edge in graph.edges
         if edge.kind == EdgeKind.CALLS and edge.source_id == call_method.id
     ]
+    assert [(edge.target_id, edge.metadata["via"]) for edge in self_calls] == [
+        (describe.id, "self_method")
+    ]
+
+    # Constructor calls on imported classes resolve through the import statement.
+    by_qn = _symbols_by_qn(graph)
+    build_registry = by_qn["app/service.build_registry"]
+    imported_calls = {
+        (by_qn_qualified, edge.metadata["via"])
+        for edge in graph.edges
+        if edge.kind == EdgeKind.CALLS and edge.source_id == build_registry.id
+        for by_qn_qualified in [
+            next(s.qualified_name for s in graph.symbols if s.id == edge.target_id)
+        ]
+    }
+    assert ("app/models.Record", "import") in imported_calls
+    assert ("app/models.Registry", "import") in imported_calls
+
+    # A call on an arbitrary object attribute is still never converted to an edge.
+    attribute_calls = [
+        edge
+        for edge in graph.edges
+        if edge.kind == EdgeKind.CALLS
+        and edge.source_id == build_registry.id
+        and edge.metadata.get("via") == "attribute"
+    ]
+    assert attribute_calls == []
 
 
 # ---------------------------------------------------------------------------

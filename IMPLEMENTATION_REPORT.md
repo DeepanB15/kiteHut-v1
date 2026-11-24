@@ -1,7 +1,7 @@
 # Implementation report — KiteHut v0.1.0
 
 ## Approach
-Repository modified in place (baseline commit `85e47c4`). The existing Code Graph, retrieval and verification engines were reused; no heavy dependencies added. Historical RepoLens docs were archived, not deleted.
+Repository modified in place. No external baseline commit is assumed: the checkout's history has a single initial commit, so the older `85e47c4` references in RepoLens-era notes could not be verified and were corrected. The existing Code Graph, retrieval and verification engines were reused; no heavy dependencies added. Historical RepoLens docs were archived, not deleted.
 
 ## What was done
 1. **Baseline & audit** — 919 pass / 19 fail on a clean install; audit in `docs/architecture/CONTEXT_AUDIT.md`.

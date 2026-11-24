@@ -1,7 +1,7 @@
 ================================================================================
 REPOLENS v1 → KITEHUT AUDIT — READ-ONLY COMPLETE REPORT
 Audit date: 2026-11-03 | Mode: READ-ONLY | Zero file modifications made
-Repo path: C:\Users\Deepan B\Desktop\repolens-v3\repolens-v1
+Repo path: <repo>
 ================================================================================
 
 SECTION 1 — REPOSITORY STRUCTURE
@@ -199,7 +199,7 @@ P2 (low — cosmetic / future optimization):
 - Embedding persistence uses line-delimited JSON (.jsonl) rather than binary/indexed format — fine for audit/small-scale
 - No automated CI pipeline file found (.github/, .gitlab-ci.yml) — add if deployment needed
 - README.md reference to "RepoLens" requires update with rename
-- Memory directory at user profile (C:\Users\Deepan B\.claude-omniroute\...) is external to repo; no impact
+- Memory directory at user profile (<user-profile>/.claude-omniroute\...) is external to repo; no impact
 
 SECTION 15 — FINAL AUDIT SUMMARY (ALL 9 REQUIRED SECTIONS + 6 ADDITIONAL)
 --------------------------------------------------------------------------

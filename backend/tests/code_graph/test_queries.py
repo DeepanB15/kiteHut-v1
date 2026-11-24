@@ -177,3 +177,79 @@ def test_to_networkx_parallel_edges_preserved(graph) -> None:
     # MultiDiGraph must allow parallel edges; total edge count matches.
     assert projected.is_multigraph()
     assert projected.number_of_edges() == len(graph.edges)
+
+
+# ------------------------------------------------ impact & import cycles ----
+
+
+@pytest.fixture(scope="module")
+def cyclic_repo(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("cyclic_repo")
+    _write(root, "pkg/__init__.py", "")
+    _write(root, "pkg/a.py", "from pkg.b import bfun\n\ndef afun():\n    return bfun()\n")
+    _write(root, "pkg/b.py", "from pkg.a import afun\n\ndef bfun():\n    return 1\n")
+    _write(root, "pkg/c.py", "from pkg.a import afun\n\ndef cfun():\n    return afun()\n")
+    _write(root, "pkg/d.py", "from pkg.c import cfun\n\ndef dfun():\n    return cfun()\n")
+    return root
+
+
+@pytest.fixture(scope="module")
+def cyclic_graph(cyclic_repo: Path):
+    result = CodeGraphBuilder(cyclic_repo).build()
+    assert result.graph is not None
+    return result.graph
+
+
+def test_import_cycles_detects_members_and_edges(cyclic_graph) -> None:
+    from app.code_graph.queries import import_cycles
+
+    cycles = import_cycles(cyclic_graph)
+    assert len(cycles) == 1
+    cycle = cycles[0]
+    assert cycle.members == ["pkg/a.py", "pkg/b.py"]
+    assert {edge.source_file for edge in cycle.edges} == {"pkg/a.py", "pkg/b.py"}
+    assert all(edge.start_line >= 1 for edge in cycle.edges)
+    description = cycle.describe()
+    assert "pkg/a.py" in description and "pkg/b.py" in description
+    assert "pkg/a.py:" in description  # source location, not just the path
+
+
+def test_import_cycles_absent_in_acyclic_graph(graph) -> None:
+    from app.code_graph.queries import import_cycles
+
+    assert import_cycles(graph) == []
+
+
+def test_impacted_files_is_transitive_and_bounded(cyclic_graph) -> None:
+    from app.code_graph.queries import impacted_files
+
+    target = next(f for f in cyclic_graph.files if f.relative_path == "pkg/a.py")
+    impacted = impacted_files(cyclic_graph, target.id, max_depth=3)
+    assert [(item.relative_path, item.depth) for item in impacted] == [
+        ("pkg/b.py", 1),
+        ("pkg/c.py", 1),
+        ("pkg/d.py", 2),
+    ]
+    assert impacted_files(cyclic_graph, target.id, max_depth=0) == []
+
+
+def test_impacted_symbols_follow_resolved_calls(cyclic_graph) -> None:
+    from app.code_graph.queries import impacted_symbols
+
+    bfun = next(s for s in cyclic_graph.symbols if s.qualified_name == "pkg/b.bfun")
+    impacted = impacted_symbols(cyclic_graph, bfun.id, max_depth=2)
+    assert [(item.qualified_name, item.depth) for item in impacted] == [
+        ("pkg/a.afun", 1),
+        ("pkg/c.cfun", 2),
+    ]
+    assert all(item.relationship == "calls" for item in impacted)
+
+
+def test_impact_entry_carries_edge_provenance(cyclic_graph) -> None:
+    from app.code_graph.queries import impacted_files
+
+    target = next(f for f in cyclic_graph.files if f.relative_path == "pkg/a.py")
+    first = impacted_files(cyclic_graph, target.id)[0]
+    assert first.edge.kind == EdgeKind.IMPORTS
+    assert first.edge.source_file == first.relative_path
+    assert first.edge.start_line >= 1

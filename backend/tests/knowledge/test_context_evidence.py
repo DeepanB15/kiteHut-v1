@@ -122,3 +122,38 @@ def test_graph_cache_is_reused_and_invalidated_by_refresh(analyzed):
     refresh(repo)
     after = load_graph(repo)
     assert after is not before and any(s.name == "brand_new" for s in after.symbols)
+
+
+# ---- explicit evidence verdicts (C3) -------------------------------------------
+def test_verdict_verified_for_supported_fresh_claim(analyzed):
+    repo, _ = analyzed
+    r = collect_evidence(repo, "main exists in pkg/core.py", target_file="pkg/core.py", verify=True)
+    assert r.verdict == "VERIFIED" and r.status == "SUPPORTED"
+
+
+def test_verdict_unverified_without_verification(analyzed):
+    repo, _ = analyzed
+    r = collect_evidence(repo, "main exists in pkg/core.py", target_file="pkg/core.py")
+    assert r.verdict == "UNVERIFIED"
+
+
+def test_verdict_stale_never_verified_after_source_change(analyzed):
+    repo, _ = analyzed
+    (repo / "pkg/core.py").write_text("# edited\n" + (repo / "pkg/core.py").read_text(encoding="utf-8"), encoding="utf-8")
+    r = collect_evidence(repo, "main exists in pkg/core.py", target_file="pkg/core.py", verify=True)
+    assert r.verdict == "STALE" and r.verdict != "VERIFIED"
+
+
+def test_verdict_not_found_for_missing_target_file(analyzed):
+    repo, _ = analyzed
+    r = collect_evidence(repo, "ghost exists", target_file="pkg/ghost.py", verify=True)
+    assert r.verdict == "NOT_FOUND"
+
+
+def test_verdict_payload_is_machine_readable(analyzed):
+    repo, _ = analyzed
+    data = collect_evidence(repo, "main exists", target_file="pkg/core.py", verify=True).to_dict()
+    for key in ("statement", "status", "verdict", "generated_at", "graph_schema_version", "kitehut_version", "spans"):
+        assert key in data
+    assert data["verdict"] in {"VERIFIED", "UNVERIFIED", "STALE", "INSUFFICIENT_EVIDENCE", "NOT_FOUND"}
+    assert all("evidence_type" in s and "verified" in s for s in data["spans"])

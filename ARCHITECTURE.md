@@ -26,7 +26,7 @@ source to verify claims.
 | Layer | Modules | Notes |
 |---|---|---|
 | Repository Scanner | `code_graph/discovery.py` | Python files only; `.gitignore` subset; built-in excludes (venvs, caches, build, `.git`, `.kitehut`); directory symlinks never followed; escaping file symlinks skipped; `max_files` cap |
-| Engine A — Code Graph | `code_graph/` (`models`, `python_extractor`, `relationships`, `builder`, `validation`, `serialization`, `queries`, `graph_runtime`, `integration`, `evidence`) | Pre-existing; reused unchanged except two fixes (see CHANGELOG). Deterministic JSON; conservative relationship resolution preserved |
+| Engine A — Code Graph | `code_graph/` (`models`, `python_extractor`, `relationships`, `builder`, `validation`, `serialization`, `queries`, `graph_runtime`, `integration`, `evidence`) | Pre-existing; extended with cross-file call resolution and impact/cycle queries (see CHANGELOG). Deterministic JSON; only unique, source-backed relationships become edges |
 | Engine B — Smart Context | `knowledge/context.py` (new), reusing `code_graph/integration.discover_graph_candidates` | Lexical + graph ranking, overlap de-duplication, token budget, freshness check per file |
 | Engine C — Evidence | `knowledge/evidence.py` (new adapter) over `code_graph/evidence.py` and `verification/` | Spans re-read from disk, hashed, compared to graph snapshot; verifier verdicts reused |
 | Knowledge output | `knowledge/` (`generator`, `markdown`, `visualize`, `metadata`, `store`, `safe_io`, `index`, `redact`) | Writes `.kitehut/` |
@@ -38,7 +38,9 @@ source to verify claims.
 1. Resolve and validate `PATH` (exists, is a directory).
 2. Scan + build graph (read-only). A failed build writes nothing.
 3. Validate the graph.
-4. Prepare `.kitehut/` (refuses symlinks/escapes).
+4. Prepare `.kitehut/` (refuses symlinks/escapes) and run the ownership preflight: existing
+   `metadata.json`/`repository.json` that KiteHut cannot prove it generated stop the run *before*
+   any write.
 5. Write `graph/repository.json` (validated, atomic).
 6. Generate Markdown pages (bounded for large repos) and prune only *generated* pages that no longer apply.
 7. Render `graph.html`.
@@ -55,7 +57,9 @@ it serves and **skips** any that no longer match the stored graph. Evidence flag
 
 - Writes are confined to `<repo>/.kitehut`; no path component may be a symlink; traversal refused.
 - Atomic writes (temp file in the same directory, fsync, `os.replace`).
-- Only files carrying the `kitehut:generated` marker are overwritten or pruned.
+- Only files carrying the `kitehut:generated` marker are overwritten or pruned. The graph JSON
+  cannot embed the marker without a schema change, so it is only overwritten when a KiteHut
+  `metadata.json` from a previous run proves the folder is ours.
 - MCP: server root is fixed at startup; no argument can widen it; read-only by default.
 - Served snippets get best-effort secret redaction (heuristic).
 

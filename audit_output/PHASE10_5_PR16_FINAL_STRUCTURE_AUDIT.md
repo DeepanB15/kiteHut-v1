@@ -1,6 +1,6 @@
 # KiteHut PR-1.6 — Final Project Structure Audit
 
-**Audit scope:** read-only inspection of `C:\Users\Deepan B\Desktop\KiteHut`
+**Audit scope:** read-only inspection of `<repo>`
 **Outcome:** inventory completed; cleanup is not approved or performed.
 
 ## 1. Current directory tree and inventory
@@ -155,7 +155,7 @@ Database inspection used SQLite read-only connections. No database was changed a
 
 | Check | Result |
 |---|---|
-| Git root is the current KiteHut directory | **PASS** — `C:/Users/Deepan B/Desktop/KiteHut` |
+| Git root is the current KiteHut directory | **PASS** — `<repo>` |
 | Remote is `DeepanB15/kiteHut` | **PASS** — `https://github.com/DeepanB15/kiteHut.git` |
 | Current branch is `main` | **PASS** |
 | Current HEAD | `4cadd49092abbe8bc0b6e9e5f93970b6492fbeb9` (`first commit`, no parent) |

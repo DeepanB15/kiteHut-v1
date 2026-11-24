@@ -4,7 +4,7 @@
 PASS
 
 ## Repository State
-- Repository: /c/Users/Deepan B/Desktop/repolens-v3/repolens-v1/
+- Repository: <repo>/
 - Branch: main
 - HEAD: 95e08e1 Initial commit
 - Git status: pre-existing modifications preserved (config.py, ollama_provider.py, main.py, pytest.ini, requirements.txt, tests/__init__.py, frontend files); .gitignore new; cleanup 1 deletions preserved (backend/repolens.db, server.err, vite.err); Cleanup 1 completed; zero unexpected modifications from this verification.
