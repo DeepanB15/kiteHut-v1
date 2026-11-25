@@ -63,6 +63,13 @@ def generate_after_analysis(
             .first()
         )
 
+        # Guard: ensure the previous run is genuinely different from the current one.
+        # In Python 3.11, SQLAlchemy filter interpretation can differ, so we explicitly
+        # verify the ID differs to avoid CRITICAL_RESOLVED being incorrectly generated
+        # when only one run exists (as in test_9_notification_webhook).
+        if previous and previous.id == analysis_run_id:
+            previous = None
+
         # Health scores
         new_health = db.query(RepositoryHealth).filter(
             RepositoryHealth.analysis_run_id == analysis_run_id
