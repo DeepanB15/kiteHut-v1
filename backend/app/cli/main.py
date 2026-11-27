@@ -1,5 +1,6 @@
-"""
-KiteHut master CLI entry point.
+"""KiteHut master CLI entry point.
+
+^^^ Shebang not needed since we use `python -m kitehut` or `kitehut` entry point.
 """
 
 import sys
@@ -25,10 +26,14 @@ from app.cli.commands.knowledge_cmds import (
     visualize_command,
 )
 from app.cli.commands.models_cmd import models_command
+from app.cli.commands.impact_cmd import impact_command
 from app.cli.commands.report_cmd import report_command
 from app.cli.commands.review_cmd import review_command
 from app.cli.commands.start_cmd import start_command
 from app.cli.commands.status_cmd import status_command
+from app.cli.commands.traverse_cmd import traverse_command
+
+from app.cli.commands.github_cmd import github_group
 
 
 @click.group(
@@ -44,9 +49,20 @@ def cli():
 
 # Register all subcommands
 # KiteHut knowledge commands
-for _cmd in (analyze_command, graph_command, knowledge_command, visualize_command, refresh_command,
-             context_command, evidence_command, mcp_command):
+for _cmd in (
+    analyze_command,
+    graph_command,
+    knowledge_command,
+    visualize_command,
+    refresh_command,
+    context_command,
+    evidence_command,
+    mcp_command,
+):
     cli.add_command(_cmd)
+
+# Impact analysis command
+cli.add_command(impact_command)
 
 # Legacy agent / guardian commands (kept for compatibility)
 cli.add_command(init_command)
@@ -61,6 +77,7 @@ cli.add_command(git_group)
 cli.add_command(github_group)
 cli.add_command(models_command)
 cli.add_command(doctor_command)
+cli.add_command(traverse_command)
 
 
 def main():
@@ -69,4 +86,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()
